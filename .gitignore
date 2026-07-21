@@ -1,0 +1,7 @@
+*.db
+*.log
+recovery_*/
+output/
+__pycache__/
+*.pyc
+*.pyo
