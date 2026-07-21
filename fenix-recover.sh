@@ -26,6 +26,7 @@ OUTDIR=""
 MODE_FOREMOST=1
 MODE_PHOTOREC=1
 MODE_MERGE=1
+VALIDATE=1
 
 # Load config
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/fenix-recover"
@@ -55,6 +56,8 @@ OPCIONAL:
   --merge-only              Solo dedup (asume foremost/ y photorec/ ya existen)
   --ddrescue                Crear imagen con ddrescue antes de tallar
   --no-dedup                No deduplicar (dejar outputs raw)
+  --no-validate             Skip validación de archivos (solo dedup)
+  --validate-only           Solo validar merged/ existente
   -q                        Modo silencioso
   -h                        Ayuda
 
@@ -63,6 +66,7 @@ EJEMPLOS:
   sudo ./fenix-recover.sh -i /dev/sdb -t jpg,pdf --ddrescue
   ./fenix-recover.sh -i imagen.dd -o ~/recuperado
   ./fenix-recover.sh --merge-only -o ~/recuperado
+  ./fenix-recover.sh --validate-only -o ~/recuperado
 EOF
     exit 0
 }
@@ -216,6 +220,39 @@ run_photorec() {
     echo "$count:$elapsed" > "$outdir/.photorec_stats"
 }
 
+run_validate() {
+    local outdir="$1"
+    log "=== FASE 4: Validación y Reparación ==="
+    local py="$SCRIPT_DIR/fenix-validate.py"
+    if [[ ! -f "$py" ]]; then
+        py=$(command -v fenix-validate.py 2>/dev/null || true)
+    fi
+    if [[ -z "$py" || ! -f "$py" ]]; then
+        err "fenix-validate.py no encontrado en $SCRIPT_DIR ni en PATH"
+        return 1
+    fi
+    local target="$outdir/merged"
+    if [[ ! -d "$target" ]]; then
+        warn "No existe $target. Saltando validación."
+        return 1
+    fi
+    log "Ejecutando: python3 $py ..."
+    python3 "$py" \
+        --input "$target" \
+        --valid "$target/valid" \
+        --corrupt "$target/corrupt" \
+        --repair "$target/repaired" \
+        --report "$outdir/validate_report.json"
+    local vcount
+    vcount=$(python3 -c "import json; d=json.load(open('$outdir/validate_report.json')); print(d.get('valid',0))" 2>/dev/null || echo "?")
+    local rcount
+    rcount=$(python3 -c "import json; d=json.load(open('$outdir/validate_report.json')); print(d.get('repaired',0))" 2>/dev/null || echo "?")
+    local ccount
+    ccount=$(python3 -c "import json; d=json.load(open('$outdir/validate_report.json')); print(d.get('corrupt',0))" 2>/dev/null || echo "?")
+    log "Validación: $vcount válidos, $rcount reparados, $ccount corruptos"
+    echo "$vcount:$rcount:$ccount" > "$outdir/.validate_stats"
+}
+
 run_dedup() {
     local outdir="$1"
     log "=== FASE 3: Deduplicación y Merge ==="
@@ -266,6 +303,13 @@ show_stats() {
         total=$(find "$outdir/merged" -type f 2>/dev/null | wc -l)
         echo -e "  ${CYAN}Total merged:${NC} $total archivos"
     fi
+    if [[ -f "$outdir/.validate_stats" ]]; then
+        local vcount rcount ccount
+        IFS=':' read -r vcount rcount ccount < "$outdir/.validate_stats"
+        echo -e "  ${GREEN}Válidos:${NC}    $vcount"
+        echo -e "  ${YELLOW}Reparados:${NC}  $rcount"
+        echo -e "  ${RED}Corruptos:${NC}  $ccount"
+    fi
     echo "  ${CYAN}Salida:${NC}     $outdir"
     echo "=============================================="
     echo ""
@@ -299,6 +343,10 @@ if [[ $# -eq 0 ]]; then
     if [[ "$dd_sel" =~ ^[sSyY] ]]; then
         DDRESCUE=1
     fi
+    read -r -p "Validar archivos recuperados (corruptos vs válidos)? (S/n): " val_sel
+    if [[ "$val_sel" =~ ^[nN] ]]; then
+        VALIDATE=0
+    fi
 else
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -310,6 +358,8 @@ else
             --merge-only) MODE_FOREMOST=0; MODE_PHOTOREC=0; shift ;;
             --ddrescue) DDRESCUE=1; shift ;;
             --no-dedup) DEDUP=0; shift ;;
+            --no-validate) VALIDATE=0; shift ;;
+            --validate-only) MODE_FOREMOST=0; MODE_PHOTOREC=0; MODE_MERGE=0; DEDUP=0; VALIDATE=1; INPUT=""; shift ;;
             -q) QUIET=1; shift ;;
             -h) usage ;;
             *) err "Opción desconocida: $1"; usage ;;
@@ -368,6 +418,11 @@ if [[ $DEDUP -eq 1 ]]; then
     else
         warn "Saltando dedup: faltan foremost/ o photorec/"
     fi
+fi
+
+# Validate
+if [[ $VALIDATE -eq 1 ]]; then
+    run_validate "$OUTDIR"
 fi
 
 # Stats

@@ -1,18 +1,20 @@
 # fenix-recover
 
-Super script de recuperación de datos que fusiona **Foremost** y **PhotoRec** con deduplicación inteligente.
+Super script de recuperación de datos que fusiona **Foremost** y **PhotoRec** con deduplicación inteligente y validación de archivos recuperados.
 
 ## Cómo funciona
 
 1. **Foremost** — carvado rápido por headers/footers, organiza por tipo
 2. **PhotoRec** — carvado profundo (300+ formatos, soporte de fragmentación)
 3. **Deduplicación** — SHA256 + SQLite, prioriza archivos de Foremost, merge unificado por tipo
+4. **Validación** — Analiza cada archivo, detecta corruptos, repara JPEGs truncados y MP4s dañados
 
 ```
 INPUT (/dev/sdb o imagen.dd)
   ├── Foremost ──→ foremost/ (jpg/, pdf/, ...)
   ├── PhotoRec ──→ photorec/ (recup_dir.*/)
-  └── Dedup ─────→ merged/ (jpg/, pdf/, ..., único por hash)
+  ├── Dedup ─────→ merged/ (jpg/, pdf/, ..., único por hash)
+  └── Validate ──→ merged/valid/ + merged/repaired/ + merged/corrupt/
 ```
 
 ## Requisitos
@@ -45,6 +47,9 @@ sudo ./fenix-recover.sh -i /dev/sdb --ddrescue
 
 # Solo deduplicar (si ya corriste ambas herramientas)
 ./fenix-recover.sh --merge-only -o ~/recuperado
+
+# Solo validar un merged/ existente
+./fenix-recover.sh --validate-only -o ~/recuperado
 ```
 
 ## Flags
@@ -59,6 +64,8 @@ sudo ./fenix-recover.sh -i /dev/sdb --ddrescue
 | `--merge-only` | Solo deduplicar (ya existen foremost/ y photorec/) |
 | `--ddrescue` | Crear imagen con ddrescue antes de tallar |
 | `--no-dedup` | No deduplicar, dejar outputs raw |
+| `--no-validate` | Skip validación de archivos |
+| `--validate-only` | Solo validar merged/ existente |
 | `-q` | Modo silencioso |
 
 ## Estructura de salida
@@ -78,8 +85,12 @@ recovery_20260721_1430/
 │   ├── jpg/
 │   ├── pdf/
 │   ├── zip/
-│   └── unknown/
-├── report.json        # Stats del proceso
+│   ├── unknown/
+│   ├── valid/         # Archivos que pasaron validación
+│   ├── repaired/      # Archivos corruptos reparados
+│   └── corrupt/       # Archivos corruptos no recuperables
+├── report.json        # Stats del proceso (dedup)
+├── validate_report.json # Stats de validación
 ├── hashes.db          # SQLite con SHA256
 ├── audit.log          # Log completo
 └── disk_image.dd      # (si se usó --ddrescue)
