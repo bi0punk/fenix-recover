@@ -1,20 +1,20 @@
 # fenix-recover
 
-Super script de recuperación de datos que fusiona **Foremost** y **PhotoRec** con deduplicación inteligente y validación de archivos recuperados.
+Super script de recuperación de datos que fusiona **Foremost** y **PhotoRec** en una sola pasada con salida única, deduplicación automática y validación de archivos.
 
 ## Cómo funciona
 
-1. **Foremost** — carvado rápido por headers/footers, organiza por tipo
-2. **PhotoRec** — carvado profundo (300+ formatos, soporte de fragmentación)
-3. **Deduplicación** — SHA256 + SQLite, prioriza archivos de Foremost, merge unificado por tipo
-4. **Validación** — Analiza cada archivo, detecta corruptos, repara JPEGs truncados y MP4s dañados
+1. **Foremost** — carvado rápido → `.tmp/foremost/`
+2. **PhotoRec** — carvado profundo → `.tmp/photorec/`
+3. **Deduplicación** — Copia a `jpg/`, `pdf/`, etc. con nombres únicos (`F_NNNNNN.jpg`, `P_NNNNNN.jpg`). SHA256 evita duplicados entre ambas herramientas
+4. **Validación** — Clasifica en `valid/`, `repaired/`, `corrupt/`
 
 ```
 INPUT (/dev/sdb o imagen.dd)
-  ├── Foremost ──→ foremost/ (jpg/, pdf/, ...)
-  ├── PhotoRec ──→ photorec/ (recup_dir.*/)
-  ├── Dedup ─────→ merged/ (jpg/, pdf/, ..., único por hash)
-  └── Validate ──→ merged/valid/ + merged/repaired/ + merged/corrupt/
+  ├── Foremost ──→ .tmp/foremost/
+  ├── PhotoRec ──→ .tmp/photorec/   (dedup automático contra Foremost)
+  ├── Dedup ─────→ jpg/, pdf/, ...   (salida única: F_ + P_)
+  └── Validate ──→ valid/, repaired/, corrupt/
 ```
 
 ## Requisitos
@@ -45,10 +45,7 @@ sudo ./fenix-recover.sh -i /dev/sdb -o ~/recuperado -t jpg,pdf,zip
 # Crear imagen con ddrescue primero (seguro)
 sudo ./fenix-recover.sh -i /dev/sdb --ddrescue
 
-# Solo deduplicar (si ya corriste ambas herramientas)
-./fenix-recover.sh --merge-only -o ~/recuperado
-
-# Solo validar un merged/ existente
+# Solo validar una salida existente
 ./fenix-recover.sh --validate-only -o ~/recuperado
 ```
 
@@ -61,39 +58,40 @@ sudo ./fenix-recover.sh -i /dev/sdb --ddrescue
 | `-t` | Tipos de archivo separados por coma (default: todos) |
 | `--foremost-only` | Solo ejecutar Foremost |
 | `--photorec-only` | Solo ejecutar PhotoRec |
-| `--merge-only` | Solo deduplicar (ya existen foremost/ y photorec/) |
 | `--ddrescue` | Crear imagen con ddrescue antes de tallar |
-| `--no-dedup` | No deduplicar, dejar outputs raw |
 | `--no-validate` | Skip validación de archivos |
-| `--validate-only` | Solo validar merged/ existente |
+| `--validate-only` | Solo validar salida existente |
 | `-q` | Modo silencioso |
 
 ## Estructura de salida
 
 ```
 recovery_20260721_1430/
-├── foremost/          # Output raw de Foremost
-│   ├── audit.txt
+├── jpg/                # ★ Archivos únicos (F_ de Foremost, P_ de PhotoRec)
+│   ├── F_00000001.jpg
+│   ├── F_00000002.jpg
+│   ├── P_00000001.jpg   ← solo si PhotoRec encontró algo único
+│   └── ...
+├── pdf/
+├── zip/
+├── unknown/
+├── ...                 # otros tipos según lo recuperado
+│
+├── valid/              # Copia de archivos que pasaron validación
 │   ├── jpg/
 │   ├── pdf/
 │   └── ...
-├── photorec/          # Output raw de PhotoRec
-│   ├── recup_dir.1/
-│   ├── recup_dir.2/
-│   └── report.xml
-├── merged/            # ★ Resultado final deduplicado
-│   ├── jpg/
-│   ├── pdf/
-│   ├── zip/
-│   ├── unknown/
-│   ├── valid/         # Archivos que pasaron validación
-│   ├── repaired/      # Archivos corruptos reparados
-│   └── corrupt/       # Archivos corruptos no recuperables
-├── report.json        # Stats del proceso (dedup)
-├── validate_report.json # Stats de validación
-├── hashes.db          # SQLite con SHA256
-├── audit.log          # Log completo
-└── disk_image.dd      # (si se usó --ddrescue)
+├── repaired/           # Archivos corruptos que se pudieron reparar
+│   └── jpg/
+├── corrupt/            # Archivos corruptos sin reparación
+│   └── jpg/
+│
+├── report.json         # Stats de dedup
+├── validate_report.json# Stats de validación
+├── hashes.db           # SQLite con SHA256
+├── disk_image.dd       # (si se usó --ddrescue)
+├── ddrescue.log
+└── .tmp/               # Se elimina automáticamente al final
 ```
 
 ## Advertencias

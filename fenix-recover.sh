@@ -8,7 +8,6 @@ VERSION="1.0.0"
 RED='\033[0;31m'; GREEN='\033[0;32m'
 YELLOW='\033[1;33m'; CYAN='\033[0;36m'
 NC='\033[0m'
-
 log()  { echo -e "${GREEN}[+]${NC} $1"; }
 warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 err()  { echo -e "${RED}[x]${NC} $1" >&2; }
@@ -16,7 +15,7 @@ err()  { echo -e "${RED}[x]${NC} $1" >&2; }
 # Defaults
 TYPES="all"
 QUIET=0
-DEDUP=1
+VALIDATE=1
 DDRESCUE=0
 FOREMOST_FLAGS="-v -T"
 PHOTOREC_FLAGS=""
@@ -25,8 +24,6 @@ INPUT=""
 OUTDIR=""
 MODE_FOREMOST=1
 MODE_PHOTOREC=1
-MODE_MERGE=1
-VALIDATE=1
 
 # Load config
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/fenix-recover"
@@ -51,13 +48,11 @@ REQUERIDO:
 OPCIONAL:
   -o <directorio>           Directorio base de salida (default: ./recovery_<ts>)
   -t <tipos>                Tipos específicos (jpg,pdf,zip... default: todos)
-  --foremost-only           Solo ejecutar foremost
-  --photorec-only           Solo ejecutar photorec
-  --merge-only              Solo dedup (asume foremost/ y photorec/ ya existen)
+  --foremost-only           Solo ejecutar Foremost
+  --photorec-only           Solo ejecutar PhotoRec
   --ddrescue                Crear imagen con ddrescue antes de tallar
-  --no-dedup                No deduplicar (dejar outputs raw)
-  --no-validate             Skip validación de archivos (solo dedup)
-  --validate-only           Solo validar merged/ existente
+  --no-validate             Skip validación de archivos
+  --validate-only           Solo validar salida existente
   -q                        Modo silencioso
   -h                        Ayuda
 
@@ -65,18 +60,17 @@ EJEMPLOS:
   sudo ./fenix-recover.sh -i /dev/sdb -o ~/recuperado
   sudo ./fenix-recover.sh -i /dev/sdb -t jpg,pdf --ddrescue
   ./fenix-recover.sh -i imagen.dd -o ~/recuperado
-  ./fenix-recover.sh --merge-only -o ~/recuperado
   ./fenix-recover.sh --validate-only -o ~/recuperado
 EOF
     exit 0
 }
 
 cleanup() {
-    local exit_code=$?
-    if [[ $exit_code -ne 0 ]]; then
-        warn "Script interrumpido. Los outputs parciales están en: ${OUTDIR:-N/A}"
+    local ec=$?
+    if [[ $ec -ne 0 ]]; then
+        warn "Script interrumpido. Output parcial en: ${OUTDIR:-N/A}"
     fi
-    exit $exit_code
+    exit $ec
 }
 trap cleanup EXIT INT TERM
 
@@ -93,7 +87,7 @@ check_deps() {
             log "Instalando: ${missing[*]}..."
             apt-get update -qq && apt-get install -y -qq foremost testdisk python3
         else
-            err "Instala manualmente: ${missing[*]}"
+            err "Instala manualmente:"
             err "  Debian/Ubuntu: sudo apt-get install foremost testdisk python3"
             err "  Arch:          sudo pacman -S foremost testdisk python"
             exit 1
@@ -111,7 +105,7 @@ validate_input() {
         log "Input: archivo de imagen $input"
         return 0
     else
-        err "Input no válido: $input (debe ser dispositivo de bloques o archivo)"
+        err "Input no válido: $input (debe ser dispositivo o archivo)"
         exit 1
     fi
 }
@@ -131,20 +125,20 @@ list_devices() {
 run_ddrescue() {
     local src="$1" img="$2" logf="$3"
     if command -v ddrescue &>/dev/null; then
-        log "Creando imagen con ddrescue (esto puede llevar mucho tiempo)..."
+        log "Creando imagen con ddrescue..."
         warn "Espacio necesario: al menos el tamaño del dispositivo"
         read -r -p "Confirmar creación de imagen de $src? (s/N): " confirm
         if [[ "$confirm" =~ ^[sSyY] ]]; then
             log "ddrescue $DD_FLAGS $src $img $logf"
-            ddrescue $DD_FLAGS "$src" "$img" "$logf" || warn "ddrescue reportó errores (log: $logf)"
+            ddrescue $DD_FLAGS "$src" "$img" "$logf" || warn "ddrescue reportó errores"
             log "Imagen creada: $img"
             return 0
         else
-            warn "ddrescue cancelado, trabajando sobre dispositivo directamente"
+            warn "ddrescue cancelado, trabajando sobre dispositivo"
             return 1
         fi
     else
-        warn "ddrescue no instalado. Instalar: apt-get install ddrescue"
+        warn "ddrescue no instalado (apt-get install ddrescue)"
         return 1
     fi
 }
@@ -152,13 +146,12 @@ run_ddrescue() {
 run_foremost() {
     local input="$1" outdir="$2" types="$3"
     log "=== FASE 1: Foremost ==="
-    mkdir -p "$outdir/foremost"
+    local tmp="$outdir/.tmp/foremost"
+    mkdir -p "$tmp"
     local cmd="foremost $FOREMOST_FLAGS"
-    if [[ "$types" != "all" ]]; then
-        cmd="$cmd -t $types"
-    fi
-    cmd="$cmd -i $input -o $outdir/foremost"
-    log "Ejecutando: $cmd"
+    [[ "$types" != "all" ]] && cmd="$cmd -t $types"
+    cmd="$cmd -i $input -o $tmp"
+    log "Ejecutando: foremost ..."
     SECONDS=0
     if [[ $QUIET -eq 1 ]]; then
         $cmd &>/dev/null || warn "Foremost terminó con código $?"
@@ -167,33 +160,29 @@ run_foremost() {
     fi
     local elapsed=$SECONDS
     local count=0
-    if [[ -f "$outdir/foremost/audit.txt" ]]; then
-        count=$(grep -cP '^\d+:' "$outdir/foremost/audit.txt" 2>/dev/null || echo 0)
+    if [[ -f "$tmp/audit.txt" ]]; then
+        count=$(grep -cP '^\d+:' "$tmp/audit.txt" 2>/dev/null || echo 0)
     fi
-    log "Foremost: $count archivos recuperados en ${elapsed}s"
+    log "Foremost: $count archivos en ${elapsed}s"
     echo "$count:$elapsed" > "$outdir/.foremost_stats"
 }
 
 run_photorec() {
     local input="$1" outdir="$2" types="$3"
     log "=== FASE 2: PhotoRec ==="
-    mkdir -p "$outdir/photorec"
-    local photorec_out="$outdir/photorec"
-    local cmd="photorec /d $photorec_out"
-    if [[ $QUIET -eq 0 ]]; then
-        cmd="$cmd /log"
-    fi
+    local tmp="$outdir/.tmp/photorec"
+    mkdir -p "$tmp"
+    local cmd="photorec /d $tmp"
+    [[ $QUIET -eq 0 ]] && cmd="$cmd /log"
     if [[ "$types" != "all" ]]; then
         local fileopt="fileopt,everything,disable"
         IFS=',' read -ra tarr <<< "$types"
-        for t in "${tarr[@]}"; do
-            fileopt="$fileopt,${t},enable"
-        done
+        for t in "${tarr[@]}"; do fileopt="$fileopt,${t},enable"; done
         cmd="$cmd /cmd $input $fileopt,search"
     else
         cmd="$cmd /cmd $input fileopt,everything,enable,search"
     fi
-    log "Ejecutando: photorec /d $photorec_out ..."
+    log "Ejecutando: photorec ..."
     SECONDS=0
     if [[ $QUIET -eq 1 ]]; then
         $cmd &>/dev/null || warn "PhotoRec terminó con código $?"
@@ -202,77 +191,78 @@ run_photorec() {
     fi
     local elapsed=$SECONDS
     local count=0
-    local recup_dirs=()
     while IFS= read -r d; do
-        recup_dirs+=("$d")
-    done < <(find "$photorec_out" -maxdepth 1 -type d -name 'recup_dir.*' 2>/dev/null | sort)
-    if [[ ${#recup_dirs[@]} -gt 0 ]]; then
-        for d in "${recup_dirs[@]}"; do
-            local c
-            c=$(find "$d" -type f 2>/dev/null | wc -l)
-            count=$((count + c))
-        done
-    fi
-    if [[ $count -eq 0 ]]; then
-        count=$(find "$photorec_out" -type f 2>/dev/null | wc -l)
-    fi
-    log "PhotoRec: $count archivos recuperados en ${elapsed}s"
+        local c; c=$(find "$d" -type f 2>/dev/null | wc -l)
+        count=$((count + c))
+    done < <(find "$tmp" -maxdepth 1 -type d -name 'recup_dir.*' 2>/dev/null | sort)
+    [[ $count -eq 0 ]] && count=$(find "$tmp" -type f 2>/dev/null | wc -l)
+    log "PhotoRec: $count archivos en ${elapsed}s"
     echo "$count:$elapsed" > "$outdir/.photorec_stats"
-}
-
-run_validate() {
-    local outdir="$1"
-    log "=== FASE 4: Validación y Reparación ==="
-    local py="$SCRIPT_DIR/fenix-validate.py"
-    if [[ ! -f "$py" ]]; then
-        py=$(command -v fenix-validate.py 2>/dev/null || true)
-    fi
-    if [[ -z "$py" || ! -f "$py" ]]; then
-        err "fenix-validate.py no encontrado en $SCRIPT_DIR ni en PATH"
-        return 1
-    fi
-    local target="$outdir/merged"
-    if [[ ! -d "$target" ]]; then
-        warn "No existe $target. Saltando validación."
-        return 1
-    fi
-    log "Ejecutando: python3 $py ..."
-    python3 "$py" \
-        --input "$target" \
-        --valid "$target/valid" \
-        --corrupt "$target/corrupt" \
-        --repair "$target/repaired" \
-        --report "$outdir/validate_report.json"
-    local vcount
-    vcount=$(python3 -c "import json; d=json.load(open('$outdir/validate_report.json')); print(d.get('valid',0))" 2>/dev/null || echo "?")
-    local rcount
-    rcount=$(python3 -c "import json; d=json.load(open('$outdir/validate_report.json')); print(d.get('repaired',0))" 2>/dev/null || echo "?")
-    local ccount
-    ccount=$(python3 -c "import json; d=json.load(open('$outdir/validate_report.json')); print(d.get('corrupt',0))" 2>/dev/null || echo "?")
-    log "Validación: $vcount válidos, $rcount reparados, $ccount corruptos"
-    echo "$vcount:$rcount:$ccount" > "$outdir/.validate_stats"
 }
 
 run_dedup() {
     local outdir="$1"
-    log "=== FASE 3: Deduplicación y Merge ==="
+    log "=== FASE 3: Deduplicación y copia a salida única ==="
     local py="$SCRIPT_DIR/fenix-dedup.py"
-    if [[ ! -f "$py" ]]; then
-        py=$(command -v fenix-dedup.py 2>/dev/null || true)
-    fi
+    [[ ! -f "$py" ]] && py=$(command -v fenix-dedup.py 2>/dev/null || true)
     if [[ -z "$py" || ! -f "$py" ]]; then
-        err "fenix-dedup.py no encontrado en $SCRIPT_DIR ni en PATH"
-        err "El merge manual está en: $outdir/foremost/ y $outdir/photorec/"
+        err "fenix-dedup.py no encontrado"
+        return 1
+    fi
+    local ftmp="$outdir/.tmp/foremost"
+    local ptmp="$outdir/.tmp/photorec"
+    if [[ ! -d "$ftmp" && ! -d "$ptmp" ]]; then
+        warn "No hay .tmp/foremost/ ni .tmp/photorec/ - saltando dedup"
         return 1
     fi
     log "Ejecutando: python3 $py ..."
     python3 "$py" \
-        --foremost "$outdir/foremost" \
-        --photorec "$outdir/photorec" \
-        --merged "$outdir/merged" \
+        --foremost-tmp "$ftmp" \
+        --photorec-tmp "$ptmp" \
+        --output "$outdir" \
         --db "$outdir/hashes.db" \
         --report "$outdir/report.json"
     log "Deduplicación completada"
+    # Cleanup .tmp
+    if [[ -d "$outdir/.tmp" ]]; then
+        rm -rf "$outdir/.tmp"
+        log "Directorio temporal .tmp/ eliminado"
+    fi
+}
+
+run_validate() {
+    local outdir="$1"
+    log "=== FASE 4: Validación y reparación ==="
+    local py="$SCRIPT_DIR/fenix-validate.py"
+    [[ ! -f "$py" ]] && py=$(command -v fenix-validate.py 2>/dev/null || true)
+    if [[ -z "$py" || ! -f "$py" ]]; then
+        err "fenix-validate.py no encontrado"
+        return 1
+    fi
+    if [[ ! -d "$outdir" ]]; then
+        warn "No existe $outdir - saltando validación"
+        return 1
+    fi
+    # Check if there are any files to validate (skip metadata dirs)
+    local has_files
+    has_files=$(find "$outdir" -maxdepth 2 -type f 2>/dev/null | head -5 | wc -l)
+    if [[ "$has_files" -eq 0 ]]; then
+        warn "No hay archivos para validar en $outdir"
+        return 1
+    fi
+    log "Ejecutando: python3 $py ..."
+    python3 "$py" \
+        --input "$outdir" \
+        --valid "$outdir/valid" \
+        --repair "$outdir/repaired" \
+        --corrupt "$outdir/corrupt" \
+        --report "$outdir/validate_report.json"
+    local vcount rcount ccount
+    vcount=$(python3 -c "import json; d=json.load(open('$outdir/validate_report.json')); print(d.get('valid',0))" 2>/dev/null || echo "?")
+    rcount=$(python3 -c "import json; d=json.load(open('$outdir/validate_report.json')); print(d.get('repaired',0))" 2>/dev/null || echo "?")
+    ccount=$(python3 -c "import json; d=json.load(open('$outdir/validate_report.json')); print(d.get('corrupt',0))" 2>/dev/null || echo "?")
+    log "Validación: $vcount válidos, $rcount reparados, $ccount corruptos"
+    echo "$vcount:$rcount:$ccount" > "$outdir/.validate_stats"
 }
 
 show_stats() {
@@ -292,45 +282,43 @@ show_stats() {
         echo -e "  ${GREEN}PhotoRec:${NC}  $p_count archivos en ${p_elapsed}s"
     fi
     if [[ -f "$outdir/report.json" ]]; then
-        local unique dups
-        unique=$(python3 -c "import json; d=json.load(open('$outdir/report.json')); print(d.get('dedup',{}).get('unique','?'))" 2>/dev/null || echo "?")
-        dups=$(python3 -c "import json; d=json.load(open('$outdir/report.json')); print(d.get('dedup',{}).get('duplicates_removed','?'))" 2>/dev/null || echo "?")
-        echo -e "  ${GREEN}Únicos:${NC}     $unique archivos"
-        echo -e "  ${YELLOW}Duplicados:${NC}  $dups eliminados"
-    fi
-    if [[ -d "$outdir/merged" ]]; then
-        local total
-        total=$(find "$outdir/merged" -type f 2>/dev/null | wc -l)
-        echo -e "  ${CYAN}Total merged:${NC} $total archivos"
+        local total_out
+        total_out=$(python3 -c "import json; d=json.load(open('$outdir/report.json')); print(d.get('total_files','?'))" 2>/dev/null || echo "?")
+        local fore
+        fore=$(python3 -c "import json; d=json.load(open('$outdir/report.json')); print(d['foremost'].get('copied','?'))" 2>/dev/null || echo "?")
+        local photo
+        photo=$(python3 -c "import json; d=json.load(open('$outdir/report.json')); print(d['photorec'].get('copied','?'))" 2>/dev/null || echo "?")
+        local dups
+        dups=$(python3 -c "import json; d=json.load(open('$outdir/report.json')); print(d['photorec'].get('duplicates_skipped','?'))" 2>/dev/null || echo "?")
+        echo -e "  ${CYAN}Salida única:${NC} $total_out archivos totales"
+        echo -e "  ${GREEN}  F_ (Foremost):${NC} $fore"
+        echo -e "  ${GREEN}  P_ (PhotoRec):${NC} $photo"
+        echo -e "  ${YELLOW}  Duplicados evitados:${NC} $dups"
     fi
     if [[ -f "$outdir/.validate_stats" ]]; then
-        local vcount rcount ccount
-        IFS=':' read -r vcount rcount ccount < "$outdir/.validate_stats"
-        echo -e "  ${GREEN}Válidos:${NC}    $vcount"
-        echo -e "  ${YELLOW}Reparados:${NC}  $rcount"
-        echo -e "  ${RED}Corruptos:${NC}  $ccount"
+        local v r c
+        IFS=':' read -r v r c < "$outdir/.validate_stats"
+        echo -e "  ${GREEN}Válidos:${NC}    $v | ${YELLOW}Reparados:${NC} $r | ${RED}Corruptos:${NC} $c"
     fi
     echo "  ${CYAN}Salida:${NC}     $outdir"
     echo "=============================================="
     echo ""
-    warn "Revisa los archivos antes de borrar el output de las herramientas raw"
+    warn "Revisa los archivos antes de borrar datos fuente"
     warn "Para comprimir: tar czf ${outdir}.tar.gz -C \"$(dirname "$outdir")\" \"$(basename "$outdir")\""
 }
 
 # ---- MAIN ----
 
-# Auto-sudo if not root (skip for help)
-for arg in "$@"; do
-    if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
-        usage
-    fi
-done
+# Help check before sudo
+for arg in "$@"; do [[ "$arg" == "-h" || "$arg" == "--help" ]] && usage; done
+
+# Auto-sudo
 if [[ $EUID -ne 0 ]]; then
     echo "[!] $APP necesita privilegios root. Re-ejecutando con sudo..."
     exec sudo "$0" "$@"
 fi
 
-# Interactive mode
+# Interactivo o args
 if [[ $# -eq 0 ]]; then
     echo "$APP v$VERSION - Super script de recuperación Foremost + PhotoRec"
     echo ""
@@ -340,39 +328,31 @@ if [[ $# -eq 0 ]]; then
     read -r -p "Tipos de archivo (default: todos, ej: jpg,pdf): " types_sel
     TYPES="${types_sel:-all}"
     read -r -p "Crear imagen con ddrescue primero? (s/N): " dd_sel
-    if [[ "$dd_sel" =~ ^[sSyY] ]]; then
-        DDRESCUE=1
-    fi
-    read -r -p "Validar archivos recuperados (corruptos vs válidos)? (S/n): " val_sel
-    if [[ "$val_sel" =~ ^[nN] ]]; then
-        VALIDATE=0
-    fi
+    [[ "$dd_sel" =~ ^[sSyY] ]] && DDRESCUE=1
+    read -r -p "Validar archivos recuperados? (S/n): " val_sel
+    [[ "$val_sel" =~ ^[nN] ]] && VALIDATE=0
 else
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -i) INPUT="$2"; shift 2 ;;
             -o) OUTDIR="$2"; shift 2 ;;
             -t) TYPES="$2"; shift 2 ;;
-            --foremost-only) MODE_PHOTOREC=0; MODE_MERGE=0; shift ;;
-            --photorec-only) MODE_FOREMOST=0; MODE_MERGE=0; shift ;;
-            --merge-only) MODE_FOREMOST=0; MODE_PHOTOREC=0; shift ;;
+            --foremost-only) MODE_PHOTOREC=0; shift ;;
+            --photorec-only) MODE_FOREMOST=0; shift ;;
             --ddrescue) DDRESCUE=1; shift ;;
-            --no-dedup) DEDUP=0; shift ;;
             --no-validate) VALIDATE=0; shift ;;
-            --validate-only) MODE_FOREMOST=0; MODE_PHOTOREC=0; MODE_MERGE=0; DEDUP=0; VALIDATE=1; INPUT=""; shift ;;
+            --validate-only) MODE_FOREMOST=0; MODE_PHOTOREC=0; VALIDATE=1; INPUT=""; shift ;;
             -q) QUIET=1; shift ;;
             -h) usage ;;
             *) err "Opción desconocida: $1"; usage ;;
         esac
     done
-    if [[ $MODE_MERGE -eq 0 && $MODE_FOREMOST -eq 0 && $MODE_PHOTOREC -eq 0 ]]; then
-        : # merge-only, no necesita input
-    elif [[ -z "$INPUT" ]]; then
-        err "Flag -i es requerido (o usa --merge-only)"
-        usage
+    if [[ $MODE_FOREMOST -eq 1 || $MODE_PHOTOREC -eq 1 ]]; then
+        [[ -z "$INPUT" ]] && { err "Flag -i requerido"; usage; }
     fi
 fi
 
+# Output dir
 if [[ -z "$OUTDIR" ]]; then
     OUTDIR="./recovery_$(date +%Y%m%d_%H%M%S)"
 fi
@@ -380,16 +360,13 @@ OUTDIR="$(realpath -m "$OUTDIR")"
 
 echo ""
 log "$APP v$VERSION"
-log "Input:  ${INPUT:-N/A (merge-only)}"
+log "Input:  ${INPUT:-N/A (validate-only)}"
 log "Output: $OUTDIR"
 log "Tipos:  $TYPES"
 echo ""
 
-# Checks
 check_deps
-if [[ -n "$INPUT" ]]; then
-    validate_input "$INPUT"
-fi
+[[ -n "$INPUT" ]] && validate_input "$INPUT"
 mkdir -p "$OUTDIR"
 
 # ddrescue
@@ -411,13 +388,11 @@ if [[ $MODE_PHOTOREC -eq 1 && -n "$INPUT" ]]; then
     run_photorec "$INPUT" "$OUTDIR" "$TYPES"
 fi
 
-# Dedup
-if [[ $DEDUP -eq 1 ]]; then
-    if [[ -d "$OUTDIR/foremost" && -d "$OUTDIR/photorec" ]] || [[ $MODE_MERGE -eq 1 ]]; then
-        run_dedup "$OUTDIR"
-    else
-        warn "Saltando dedup: faltan foremost/ o photorec/"
-    fi
+# Dedup (copia de .tmp/ a salida única)
+if [[ -d "$OUTDIR/.tmp" ]]; then
+    run_dedup "$OUTDIR"
+else
+    [[ $MODE_FOREMOST -eq 1 || $MODE_PHOTOREC -eq 1 ]] && warn "No hay .tmp/ - saltando dedup"
 fi
 
 # Validate

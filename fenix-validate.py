@@ -386,12 +386,20 @@ def validate(path, repair_dir=None):
 
 # ─── main ───────────────────────────────────────────────────────────────
 
+SKIP_DIRS = {"valid", "repaired", "corrupt", ".tmp"}
+
+
 def scan(input_dir, valid_dir, corrupt_dir, repair_dir, no_move):
     total = valid_cnt = corrupt_cnt = repaired_cnt = unchecked_cnt = 0
-    by_ext = {}
+    by_type = {}
 
-    files = sorted(input_dir.rglob("*"))
-    files = [f for f in files if f.is_file()]
+    files = []
+    for sub in input_dir.iterdir():
+        if not sub.is_dir() or sub.name in SKIP_DIRS:
+            continue
+        for fpath in sorted(sub.rglob("*")):
+            if fpath.is_file():
+                files.append(fpath)
 
     print(f"[*] fenix-validate v{VERSION}")
     print(f"[*] Analizando {len(files)} archivos en {input_dir}")
@@ -402,11 +410,16 @@ def scan(input_dir, valid_dir, corrupt_dir, repair_dir, no_move):
         rel = fpath.relative_to(input_dir)
         status, info = validate(fpath, repair_dir if not no_move else None)
 
-        ext = fpath.suffix.lower() or "none"
-        by_ext.setdefault(ext, {"total": 0, "valid": 0, "corrupt": 0,
-                                "repaired": 0, "unchecked": 0})
-        by_ext[ext][status] = by_ext[ext].get(status, 0) + 1
-        by_ext[ext]["total"] += 1
+        # Obtener el tipo (subdirectorio padre, ej: jpg, pdf)
+        try:
+            file_type = rel.parts[0] if len(rel.parts) > 0 else "unknown"
+        except IndexError:
+            file_type = "unknown"
+
+        by_type.setdefault(file_type, {"total": 0, "valid": 0, "corrupt": 0,
+                                       "repaired": 0, "unchecked": 0})
+        by_type[file_type][status] = by_type[file_type].get(status, 0) + 1
+        by_type[file_type]["total"] += 1
 
         if status == "valid":
             valid_cnt += 1
@@ -427,9 +440,8 @@ def scan(input_dir, valid_dir, corrupt_dir, repair_dir, no_move):
 
         label = {"valid": "OK", "corrupt": "XX", "repaired": "RR",
                  "unchecked": "??"}.get(status, "??")
-        if status != "valid" or True:
-            info_str = f" ({info})" if info else ""
-            print(f"  [{label}] {rel}{info_str}")
+        info_str = f" ({info})" if info else ""
+        print(f"  [{label}] {rel}{info_str}")
 
     print()
     print(f"  Total:    {total}")
@@ -447,7 +459,7 @@ def scan(input_dir, valid_dir, corrupt_dir, repair_dir, no_move):
         "corrupt": corrupt_cnt,
         "repaired": repaired_cnt,
         "unchecked": unchecked_cnt,
-        "by_extension": by_ext,
+        "by_type": by_type,
         "pillow_available": HAS_PIL,
     }
     return report
@@ -459,9 +471,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--input", "-i", required=True, help="Directorio con archivos a validar (merged/)")
-    ap.add_argument("--valid", "-v", help="Directorio para copias válidas")
-    ap.add_argument("--corrupt", "-c", help="Directorio para copias corruptas")
-    ap.add_argument("--repair", "-r", help="Directorio para archivos reparados")
+    ap.add_argument("--valid", help="Directorio para copias válidas")
+    ap.add_argument("--corrupt", help="Directorio para copias corruptas")
+    ap.add_argument("--repair", help="Directorio para archivos reparados")
     ap.add_argument("--report", help="Archivo JSON de reporte")
     ap.add_argument("--no-move", action="store_true", help="No mover archivos, solo clasificar")
     ap.add_argument("--version", "-V", action="version", version=f"fenix-validate v{VERSION}")
