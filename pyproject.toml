@@ -1,0 +1,27 @@
+[project]
+name = "fenix-recover"
+version = "1.0.0"
+description = "Herramienta forense de recuperación de datos - fusiona Foremost y PhotoRec con deduplicación y validación"
+requires-python = ">=3.9"
+dependencies = [
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.6",
+    "bats>=1.10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

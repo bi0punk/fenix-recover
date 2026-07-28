@@ -20,6 +20,9 @@ from datetime import datetime
 from pathlib import Path
 
 VERSION = "1.0.0"
+_VERSION_PATH = Path(__file__).resolve().parent / "VERSION"
+if _VERSION_PATH.exists():
+    VERSION = _VERSION_PATH.read_text().strip()
 
 # Extensión por MIME type (fallback)
 EXTENSION_MAP = {
@@ -61,7 +64,7 @@ def mime_type(path: Path) -> str | None:
                            capture_output=True, text=True, timeout=5)
         if r.returncode == 0:
             return r.stdout.strip()
-    except Exception:
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
     try:
         import magic

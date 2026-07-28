@@ -2,7 +2,8 @@
 set -euo pipefail
 
 APP="fenix-recover"
-VERSION="1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "1.0.0")"
 
 # Colors
 RED='\033[0;31m'; GREEN='\033[0;32m'
@@ -28,7 +29,6 @@ MODE_PHOTOREC=1
 # Load config
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/fenix-recover"
 CONFIG_FILE="$CONFIG_DIR/fenix-recover.conf"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/fenix-recover.conf" ]]; then
     source "$SCRIPT_DIR/fenix-recover.conf"
 elif [[ -f "$CONFIG_FILE" ]]; then
@@ -371,8 +371,8 @@ mkdir -p "$OUTDIR"
 
 # ddrescue
 if [[ $DDRESCUE -eq 1 && -n "$INPUT" && -b "$INPUT" ]]; then
-    local img="$OUTDIR/disk_image.dd"
-    local logf="$OUTDIR/ddrescue.log"
+    img="$OUTDIR/disk_image.dd"
+    logf="$OUTDIR/ddrescue.log"
     if run_ddrescue "$INPUT" "$img" "$logf"; then
         INPUT="$img"
     fi

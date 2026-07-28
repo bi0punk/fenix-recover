@@ -18,6 +18,9 @@ from datetime import datetime
 from pathlib import Path
 
 VERSION = "1.0.0"
+_VERSION_PATH = Path(__file__).resolve().parent / "VERSION"
+if _VERSION_PATH.exists():
+    VERSION = _VERSION_PATH.read_text().strip()
 
 HAS_PIL = False
 try:
@@ -42,6 +45,23 @@ def run(cmd, timeout=30):
 def mime_type(path):
     rc, out, _ = run(["file", "--mime-type", "-b", str(path)])
     return out if rc == 0 else None
+
+
+def _validate_image_with_pil(path):
+    try:
+        img = Image.open(path)
+        img.verify()
+        img.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def _validate_by_magic(path, keywords):
+    rc, out, _ = run(["file", str(path)])
+    if any(kw in out for kw in keywords):
+        return True, None
+    return False, out or "invalid"
 
 
 # ─── validators ─────────────────────────────────────────────────────────
@@ -122,13 +142,9 @@ def repair_jpeg(path):
 
 def validate_png(path):
     if HAS_PIL:
-        try:
-            img = Image.open(path)
-            img.verify()
-            img.close()
+        ok, err = _validate_image_with_pil(path)
+        if ok:
             return True, None
-        except Exception as e:
-            return False, str(e)
     rc, out, _ = run(["pngcheck", str(path)])
     if rc == 0:
         return True, None
@@ -140,61 +156,36 @@ def validate_png(path):
 
 def validate_gif(path):
     if HAS_PIL:
-        try:
-            img = Image.open(path)
-            img.verify()
-            img.close()
+        ok, err = _validate_image_with_pil(path)
+        if ok:
             return True, None
-        except Exception as e:
-            return False, str(e)
     rc, out, _ = run(["identify", str(path)])
     if rc == 0:
         return True, None
-    rc, out, _ = run(["file", str(path)])
-    if "GIF" in out:
-        return True, None
-    return False, out or "invalid GIF"
+    return _validate_by_magic(path, ("GIF",))
 
 
 def validate_bmp(path):
     if HAS_PIL:
-        try:
-            img = Image.open(path)
-            img.verify()
-            img.close()
+        ok, err = _validate_image_with_pil(path)
+        if ok:
             return True, None
-        except Exception as e:
-            return False, str(e)
-    rc, out, _ = run(["file", str(path)])
-    if "BMP" in out or "bitmap" in out:
-        return True, None
-    return False, out or "invalid BMP"
+    return _validate_by_magic(path, ("BMP", "bitmap"))
 
 
 def validate_tiff(path):
     if HAS_PIL:
-        try:
-            img = Image.open(path)
-            img.verify()
-            img.close()
+        ok, err = _validate_image_with_pil(path)
+        if ok:
             return True, None
-        except Exception as e:
-            return False, str(e)
-    rc, out, _ = run(["file", str(path)])
-    if "TIFF" in out:
-        return True, None
-    return False, out or "invalid TIFF"
+    return _validate_by_magic(path, ("TIFF",))
 
 
 def validate_image_generic(path):
     if HAS_PIL:
-        try:
-            img = Image.open(path)
-            img.verify()
-            img.close()
+        ok, err = _validate_image_with_pil(path)
+        if ok:
             return True, None
-        except Exception as e:
-            return False, str(e)
     rc, out, _ = run(["identify", str(path)])
     if rc == 0:
         return True, None
@@ -238,9 +229,7 @@ def validate_zip(path):
             if bad:
                 return False, f"corrupt member: {bad}"
             return True, None
-    except zipfile.BadZipFile as e:
-        return False, str(e)
-    except Exception as e:
+    except (zipfile.BadZipFile, OSError) as e:
         return False, str(e)
 
 
@@ -267,18 +256,7 @@ def validate_rar(path):
 
 
 def validate_mp3(path):
-    if HAS_PIL:
-        try:
-            img = Image.open(path)
-            img.verify()
-            img.close()
-            return True
-        except Exception:
-            pass
-    rc, out, _ = run(["file", str(path)])
-    if "Audio" in out or "MPEG" in out or "MP3" in out:
-        return True, None
-    return False, "not a valid MP3"
+    return _validate_by_magic(path, ("Audio", "MPEG", "MP3"))
 
 
 def validate_doc(path):
