@@ -10,9 +10,7 @@ import argparse
 import json
 import os
 import shutil
-import struct
-import subprocess
-import sys
+import subprocess  # nosec B404
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +23,7 @@ if _VERSION_PATH.exists():
 HAS_PIL = False
 try:
     from PIL import Image, ImageFile
+
     ImageFile.LOAD_TRUNCATED_IMAGES = True
     HAS_PIL = True
 except ImportError:
@@ -32,9 +31,12 @@ except ImportError:
 
 # ─── helpers ────────────────────────────────────────────────────────────
 
+
 def run(cmd, timeout=30):
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(  # nosec B603, B607
+            cmd, capture_output=True, text=True, timeout=timeout
+        )
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except FileNotFoundError:
         return -1, "", "not found"
@@ -65,6 +67,7 @@ def _validate_by_magic(path, keywords):
 
 
 # ─── validators ─────────────────────────────────────────────────────────
+
 
 def validate_jpeg_pil(path):
     try:
@@ -201,8 +204,7 @@ def validate_mp4(path):
 
 def repair_mp4(path):
     repaired = path.parent / f"{path.stem}_repaired.mp4"
-    rc, _, err = run(["ffmpeg", "-y", "-i", str(path),
-                      "-c", "copy", str(repaired)], timeout=120)
+    rc, _, err = run(["ffmpeg", "-y", "-i", str(path), "-c", "copy", str(repaired)], timeout=120)
     if rc == 0 and repaired.exists():
         data = repaired.read_bytes()
         repaired.unlink()
@@ -241,7 +243,7 @@ def repair_zip(path):
             data = tmp.read_bytes()
             tmp.unlink()
             return data, "zip -F repair"
-    except Exception:
+    except Exception:  # nosec B110
         pass
     if tmp.exists():
         tmp.unlink()
@@ -261,8 +263,13 @@ def validate_mp3(path):
 
 def validate_doc(path):
     rc, out, _ = run(["file", str(path)])
-    if "Composite Document File" in out or "Microsoft Word" in out \
-       or "OLE2" in out or "Office" in out or "Zip" in out:
+    if (
+        "Composite Document File" in out
+        or "Microsoft Word" in out
+        or "OLE2" in out
+        or "Office" in out
+        or "Zip" in out
+    ):
         return True, None
     ext = path.suffix.lower()
     office_exts = {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
@@ -282,7 +289,7 @@ def validate_txt(path):
         data = path.read_bytes()
         data.decode("latin-1")
         return True, None
-    except Exception:
+    except Exception:  # nosec B110
         pass
     rc, out, _ = run(["file", str(path)])
     if "text" in out:
@@ -293,37 +300,37 @@ def validate_txt(path):
 # ─── dispatch ───────────────────────────────────────────────────────────
 
 VALIDATORS = {
-    ".jpg":  (validate_jpeg, repair_jpeg),
+    ".jpg": (validate_jpeg, repair_jpeg),
     ".jpeg": (validate_jpeg, repair_jpeg),
     ".jfif": (validate_jpeg, repair_jpeg),
-    ".png":  (validate_png, None),
-    ".gif":  (validate_gif, None),
-    ".bmp":  (validate_bmp, None),
-    ".tif":  (validate_tiff, None),
+    ".png": (validate_png, None),
+    ".gif": (validate_gif, None),
+    ".bmp": (validate_bmp, None),
+    ".tif": (validate_tiff, None),
     ".tiff": (validate_tiff, None),
     ".webp": (validate_image_generic, None),
-    ".ico":  (validate_image_generic, None),
-    ".mp4":  (validate_mp4, repair_mp4),
-    ".mov":  (validate_mp4, repair_mp4),
-    ".avi":  (validate_mp4, repair_mp4),
-    ".mkv":  (validate_mp4, repair_mp4),
-    ".pdf":  (validate_pdf, None),
-    ".zip":  (validate_zip, repair_zip),
-    ".jar":  (validate_zip, repair_zip),
+    ".ico": (validate_image_generic, None),
+    ".mp4": (validate_mp4, repair_mp4),
+    ".mov": (validate_mp4, repair_mp4),
+    ".avi": (validate_mp4, repair_mp4),
+    ".mkv": (validate_mp4, repair_mp4),
+    ".pdf": (validate_pdf, None),
+    ".zip": (validate_zip, repair_zip),
+    ".jar": (validate_zip, repair_zip),
     ".docx": (validate_zip, repair_zip),
     ".xlsx": (validate_zip, repair_zip),
     ".pptx": (validate_zip, repair_zip),
-    ".rar":  (validate_rar, None),
-    ".mp3":  (validate_mp3, None),
-    ".wav":  (validate_mp3, None),
-    ".doc":  (validate_doc, None),
-    ".xls":  (validate_doc, None),
-    ".ppt":  (validate_doc, None),
-    ".txt":  (validate_txt, None),
-    ".htm":  (validate_txt, None),
+    ".rar": (validate_rar, None),
+    ".mp3": (validate_mp3, None),
+    ".wav": (validate_mp3, None),
+    ".doc": (validate_doc, None),
+    ".xls": (validate_doc, None),
+    ".ppt": (validate_doc, None),
+    ".txt": (validate_txt, None),
+    ".htm": (validate_txt, None),
     ".html": (validate_txt, None),
-    ".xml":  (validate_txt, None),
-    ".csv":  (validate_txt, None),
+    ".xml": (validate_txt, None),
+    ".csv": (validate_txt, None),
     ".json": (validate_txt, None),
 }
 
@@ -394,8 +401,9 @@ def scan(input_dir, valid_dir, corrupt_dir, repair_dir, no_move):
         except IndexError:
             file_type = "unknown"
 
-        by_type.setdefault(file_type, {"total": 0, "valid": 0, "corrupt": 0,
-                                       "repaired": 0, "unchecked": 0})
+        by_type.setdefault(
+            file_type, {"total": 0, "valid": 0, "corrupt": 0, "repaired": 0, "unchecked": 0}
+        )
         by_type[file_type][status] = by_type[file_type].get(status, 0) + 1
         by_type[file_type]["total"] += 1
 
@@ -416,8 +424,9 @@ def scan(input_dir, valid_dir, corrupt_dir, repair_dir, no_move):
         else:
             unchecked_cnt += 1
 
-        label = {"valid": "OK", "corrupt": "XX", "repaired": "RR",
-                 "unchecked": "??"}.get(status, "??")
+        label = {"valid": "OK", "corrupt": "XX", "repaired": "RR", "unchecked": "??"}.get(
+            status, "??"
+        )
         info_str = f" ({info})" if info else ""
         print(f"  [{label}] {rel}{info_str}")
 
@@ -448,7 +457,9 @@ def main():
         description="fenix-validate - Validación y reparación de archivos recuperados",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ap.add_argument("--input", "-i", required=True, help="Directorio con archivos a validar (merged/)")
+    ap.add_argument(
+        "--input", "-i", required=True, help="Directorio con archivos a validar (merged/)"
+    )
     ap.add_argument("--valid", help="Directorio para copias válidas")
     ap.add_argument("--corrupt", help="Directorio para copias corruptas")
     ap.add_argument("--repair", help="Directorio para archivos reparados")

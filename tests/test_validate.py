@@ -9,6 +9,7 @@ spec = importlib.util.spec_from_file_location(
     "fenix_validate",
     Path(__file__).resolve().parent.parent / "fenix-validate.py",
 )
+assert spec is not None and spec.loader is not None
 fenix_validate = importlib.util.module_from_spec(spec)
 sys.modules["fenix_validate"] = fenix_validate
 spec.loader.exec_module(fenix_validate)

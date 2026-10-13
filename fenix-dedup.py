@@ -11,10 +11,9 @@ PhotoRec verifica SHA256 contra Foremost para evitar duplicados.
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import sqlite3
-import subprocess
+import subprocess  # nosec B404
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -26,12 +25,18 @@ if _VERSION_PATH.exists():
 
 # Extensión por MIME type (fallback)
 EXTENSION_MAP = {
-    "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif",
-    "image/bmp": "bmp", "image/tiff": "tiff", "image/webp": "webp",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/bmp": "bmp",
+    "image/tiff": "tiff",
+    "image/webp": "webp",
     "image/vnd.microsoft.icon": "ico",
     "application/pdf": "pdf",
-    "application/zip": "zip", "application/x-rar-compressed": "rar",
-    "application/gzip": "gz", "application/x-7z-compressed": "7z",
+    "application/zip": "zip",
+    "application/x-rar-compressed": "rar",
+    "application/gzip": "gz",
+    "application/x-7z-compressed": "7z",
     "application/x-tar": "tar",
     "application/msword": "doc",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
@@ -39,11 +44,18 @@ EXTENSION_MAP = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
     "application/vnd.ms-powerpoint": "ppt",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
-    "text/plain": "txt", "text/html": "html", "text/csv": "csv",
-    "video/mp4": "mp4", "video/x-msvideo": "avi", "video/quicktime": "mov",
+    "text/plain": "txt",
+    "text/html": "html",
+    "text/csv": "csv",
+    "video/mp4": "mp4",
+    "video/x-msvideo": "avi",
+    "video/quicktime": "mov",
     "video/x-matroska": "mkv",
-    "audio/mpeg": "mp3", "audio/wav": "wav", "audio/flac": "flac",
-    "application/json": "json", "application/xml": "xml",
+    "audio/mpeg": "mp3",
+    "audio/wav": "wav",
+    "audio/flac": "flac",
+    "application/json": "json",
+    "application/xml": "xml",
 }
 
 
@@ -60,14 +72,16 @@ def sha256_file(path: Path, bufsize: int = 1 << 20) -> str:
 
 def mime_type(path: Path) -> str | None:
     try:
-        r = subprocess.run(["file", "--mime-type", "-b", str(path)],
-                           capture_output=True, text=True, timeout=5)
+        r = subprocess.run(  # nosec B603, B607
+            ["file", "--mime-type", "-b", str(path)], capture_output=True, text=True, timeout=5
+        )
         if r.returncode == 0:
             return r.stdout.strip()
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
     try:
         import magic
+
         return magic.from_file(str(path), mime=True)
     except ImportError:
         pass
@@ -131,8 +145,9 @@ def next_counter(conn, ext: str) -> int:
     return c
 
 
-def copy_file(src: Path, dst_dir: Path, prefix: str, conn: sqlite3.Connection,
-              ext_hint: str | None = None) -> tuple[str, int] | None:
+def copy_file(
+    src: Path, dst_dir: Path, prefix: str, conn: sqlite3.Connection, ext_hint: str | None = None
+) -> tuple[str, int] | None:
     ext = classify_ext(src, ext_hint)
     ext_dir = dst_dir / ext
     ext_dir.mkdir(parents=True, exist_ok=True)
@@ -164,7 +179,7 @@ def index_foremost(conn, tmp_dir: Path, output_dir: Path):
                 size = fpath.stat().st_size
                 conn.execute(
                     "INSERT OR IGNORE INTO file_hashes (sha256, size, source, ext) VALUES (?, ?, 'foremost', ?)",
-                    (sha, size, ext_hint)
+                    (sha, size, ext_hint),
                 )
                 result = copy_file(fpath, output_dir, "F", conn, ext_hint)
                 if result:
@@ -189,15 +204,14 @@ def index_photorec(conn, tmp_dir: Path, output_dir: Path):
                 sha = sha256_file(fpath)
                 size = fpath.stat().st_size
                 cur = conn.execute(
-                    "SELECT 1 FROM file_hashes WHERE sha256=? AND size=? LIMIT 1",
-                    (sha, size)
+                    "SELECT 1 FROM file_hashes WHERE sha256=? AND size=? LIMIT 1", (sha, size)
                 )
                 if cur.fetchone():
                     dups += 1
                     continue
                 conn.execute(
                     "INSERT INTO file_hashes (sha256, size, source, ext) VALUES (?, ?, 'photorec', ?)",
-                    (sha, size, "unknown")
+                    (sha, size, "unknown"),
                 )
                 result = copy_file(fpath, output_dir, "P", conn)
                 if result:

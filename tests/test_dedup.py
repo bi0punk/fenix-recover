@@ -1,17 +1,15 @@
 import hashlib
 import importlib.util
-import sqlite3
 import sys
 import tempfile
 from pathlib import Path
-
-import pytest
 
 # Cargar módulo con guion en el nombre
 spec = importlib.util.spec_from_file_location(
     "fenix_dedup",
     Path(__file__).resolve().parent.parent / "fenix-dedup.py",
 )
+assert spec is not None and spec.loader is not None
 fenix_dedup = importlib.util.module_from_spec(spec)
 sys.modules["fenix_dedup"] = fenix_dedup
 spec.loader.exec_module(fenix_dedup)
@@ -64,9 +62,7 @@ def test_init_db():
         db_path = Path(f.name)
     conn = init_db(db_path)
     assert conn is not None
-    tables = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    ).fetchall()
+    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     table_names = {t[0] for t in tables}
     assert "file_hashes" in table_names
     assert "counters" in table_names
