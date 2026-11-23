@@ -2,7 +2,7 @@
 
 Super script de recuperación de datos que fusiona Foremost y PhotoRec en una sola pasada con salida única, deduplicación por SHA256 y validación/reparación automática de archivos recuperados.
 
-[![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python)](https://python.org)
 [![Bash](https://img.shields.io/badge/Bash-4.0%2B-4EAA25?logo=gnubash)](https://www.gnu.org/software/bash/)
 [![CI](https://github.com/bi0punk/fenix-recover/actions/workflows/ci.yml/badge.svg)](https://github.com/bi0punk/fenix-recover/actions)
 [![Licencia](https://img.shields.io/badge/Licencia-MIT-yellow)](LICENSE)
@@ -86,7 +86,7 @@ fenix-recover/
 ### Requisitos
 
 - Linux (Debian/Ubuntu, Arch, etc.)
-- `foremost`, `photorec` (testdisk), `python3`
+- `foremost`, `photorec` (testdisk), `python3` (3.10+)
 - `ddrescue` (opcional, para crear imagen antes de tallar)
 - Pillow (`pip install -r requirements.txt`)
 

@@ -2,7 +2,7 @@
 name = "fenix-recover"
 version = "1.0.0"
 description = "Herramienta forense de recuperación de datos - fusiona Foremost y PhotoRec con deduplicación y validación"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "Pillow>=10.0",
 ]
@@ -16,7 +16,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
